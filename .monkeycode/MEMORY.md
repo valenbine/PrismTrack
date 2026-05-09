@@ -128,3 +128,12 @@ Agent 在任务执行过程中发现的条目应遵循以下格式：
   - server.js 运行所需的关键 Node 运行时依赖应作为 package.json dependencies 显式声明，不能只依赖间接传递依赖被 electron-builder 自动收集
   - Windows 打包 workflow 在 npm run dist:win 后应校验 dist/win-unpacked/resources/app/node_modules 中包含 archiver、archiver-utils、zip-stream
   - package-lock.json 与 package.json 保持一致后，Windows CI 应优先使用 npm ci
+
+[PrismTrack 桌面启动 ready 协议]
+- Date: 2026-05-09
+- Context: Agent 在处理 Windows 桌面服务已监听但 /api/health 深度检查超时时发现
+- Category: 代码模式
+- Instructions:
+  - 桌面壳判断本地 Web 服务是否可打开时，应请求轻量 /api/ready，而不是会触发 Python/Spleeter/ffmpeg 探测的 /api/health
+  - /api/health 保留为深度运行时诊断接口，可在开窗后后台记录或由前端状态区使用，但不应阻塞桌面窗口创建
+  - 每次修改桌面启动等待协议时应更新 DESKTOP_RUNTIME_CHECK_REV，便于区分用户安装包版本

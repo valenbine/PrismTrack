@@ -9,7 +9,7 @@ const codeRoot = isDev ? path.resolve(__dirname, "..") : app.getAppPath();
 const entryUrl = process.env.PRISMTRACK_DESKTOP_URL || "http://127.0.0.1:8000/";
 const serverPort = Number(new URL(entryUrl).port || 8000);
 const installRoot = isDev ? codeRoot : path.dirname(process.execPath);
-const DESKTOP_RUNTIME_CHECK_REV = "runtime-check-r5-20260509";
+const DESKTOP_RUNTIME_CHECK_REV = "runtime-check-r6-20260509";
 
 let mainWindow = null;
 let serverProcess = null;
@@ -422,6 +422,19 @@ async function assertWindowsHealthRuntime(url) {
   }
 }
 
+async function logWindowsHealthRuntime(url) {
+  if (process.platform !== "win32") {
+    return;
+  }
+
+  try {
+    await assertWindowsHealthRuntime(url);
+    logInfo("background runtime health check completed");
+  } catch (error) {
+    logError("background runtime health check failed", error);
+  }
+}
+
 function summarizeRuntime(payload) {
   const runtime = payload?.runtime;
   if (!runtime) {
@@ -469,12 +482,18 @@ function waitForServer(url, timeoutMs = 30000) {
         retryOrFail(reason);
       };
 
-      const request = http.get(`${url}api/health`, (response) => {
+      const request = http.get(`${url}api/ready`, (response) => {
         if (response.statusCode === 200) {
-          completed = true;
-          response.resume();
-          logInfo("local server health check succeeded", { attempts, statusCode: response.statusCode });
-          resolve();
+          let body = "";
+          response.setEncoding("utf8");
+          response.on("data", (chunk) => {
+            body += chunk;
+          });
+          response.on("end", () => {
+            completed = true;
+            logInfo("local server ready check succeeded", { attempts, statusCode: response.statusCode, body: body.trim() });
+            resolve();
+          });
           return;
         }
         let body = "";
@@ -490,7 +509,7 @@ function waitForServer(url, timeoutMs = 30000) {
 
       request.on("error", (error) => failOnce(error.message));
       request.setTimeout(2000, () => {
-        request.destroy(new Error("health 请求超时"));
+        request.destroy(new Error("ready 请求超时"));
       });
     };
 
@@ -521,7 +540,6 @@ async function createWindow() {
   assertRuntimeReady();
   startServer();
   await waitForServer(entryUrl);
-  await assertWindowsHealthRuntime(entryUrl);
 
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -549,6 +567,7 @@ async function createWindow() {
   });
 
   await mainWindow.loadURL(entryUrl);
+  logWindowsHealthRuntime(entryUrl);
 
   if (isDev) {
     mainWindow.webContents.openDevTools({ mode: "detach" });

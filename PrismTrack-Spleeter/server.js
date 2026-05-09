@@ -73,6 +73,10 @@ export const server = http.createServer(async (request, response) => {
       return handleHealth(request, response);
     }
 
+    if (request.method === "GET" && request.url === "/api/ready") {
+      return handleReady(request, response);
+    }
+
     if (request.method === "GET" && request.url === "/api/models") {
       return handleModels(request, response);
     }
@@ -183,6 +187,14 @@ async function handleHealth(request, response) {
       },
     });
   }
+}
+
+function handleReady(request, response) {
+  sendJson(response, 200, {
+    ok: true,
+    status: "ready",
+    port: PORT,
+  });
 }
 
 async function handleModels(request, response) {
