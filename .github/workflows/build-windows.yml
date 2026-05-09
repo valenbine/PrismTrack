@@ -92,13 +92,35 @@ jobs:
           }
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build Windows installer
         env:
           GH_RUN_NUMBER: ${{ github.run_number }}
           GH_SHORT_SHA: ${{ github.sha }}
         run: npm run dist:win
+
+      - name: Verify packaged Node dependencies
+        run: |
+          $nodeModules = "dist/win-unpacked/resources/app/node_modules"
+          $required = @(
+            "archiver",
+            "archiver-utils",
+            "zip-stream"
+          )
+
+          $missing = @()
+          foreach ($item in $required) {
+            $path = Join-Path $nodeModules $item
+            if (-not (Test-Path $path)) {
+              $missing += $path
+            }
+          }
+
+          if ($missing.Count -gt 0) {
+            Write-Error "Missing packaged Node dependencies:`n$($missing -join "`n")"
+            exit 1
+          }
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4

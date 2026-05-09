@@ -119,3 +119,12 @@ Agent 在任务执行过程中发现的条目应遵循以下格式：
   - Windows 预期日志路径为 %APPDATA%/PrismTrack/logs/desktop.log，启动失败弹窗应提示该路径
   - packaged Electron 使用 process.execPath 启动 server.js 时需要设置 ELECTRON_RUN_AS_NODE=1
   - 每次修改桌面启动链路时应更新 DESKTOP_RUNTIME_CHECK_REV，便于区分用户运行的安装包版本
+
+[PrismTrack Windows packaged Node 依赖校验约定]
+- Date: 2026-05-09
+- Context: Agent 在处理安装包内缺失 archiver-utils 导致本地服务崩溃时发现
+- Category: 构建方法
+- Instructions:
+  - server.js 运行所需的关键 Node 运行时依赖应作为 package.json dependencies 显式声明，不能只依赖间接传递依赖被 electron-builder 自动收集
+  - Windows 打包 workflow 在 npm run dist:win 后应校验 dist/win-unpacked/resources/app/node_modules 中包含 archiver、archiver-utils、zip-stream
+  - package-lock.json 与 package.json 保持一致后，Windows CI 应优先使用 npm ci
