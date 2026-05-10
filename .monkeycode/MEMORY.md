@@ -137,3 +137,12 @@ Agent 在任务执行过程中发现的条目应遵循以下格式：
   - 桌面壳判断本地 Web 服务是否可打开时，应请求轻量 /api/ready，而不是会触发 Python/Spleeter/ffmpeg 探测的 /api/health
   - /api/health 保留为深度运行时诊断接口，可在开窗后后台记录或由前端状态区使用，但不应阻塞桌面窗口创建
   - 每次修改桌面启动等待协议时应更新 DESKTOP_RUNTIME_CHECK_REV，便于区分用户安装包版本
+
+[PrismTrack 桌面启动首页回退探测]
+- Date: 2026-05-10
+- Context: Agent 在处理 runtime-check-r6 安装包 /api/ready 返回 404 但服务已监听时发现
+- Category: 代码模式
+- Instructions:
+  - 桌面壳等待本地服务时应优先探测 /api/ready，若该接口返回 404 或不可用，应回退探测首页 / 是否返回 200
+  - 首页 / 返回 200 表示 Web UI 已可加载，应允许创建窗口，避免因 ready 路由版本差异阻塞桌面启动
+  - 启动日志应记录实际命中的 readiness strategy，便于区分 ready 命中和 index fallback

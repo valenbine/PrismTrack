@@ -9,7 +9,7 @@ const codeRoot = isDev ? path.resolve(__dirname, "..") : app.getAppPath();
 const entryUrl = process.env.PRISMTRACK_DESKTOP_URL || "http://127.0.0.1:8000/";
 const serverPort = Number(new URL(entryUrl).port || 8000);
 const installRoot = isDev ? codeRoot : path.dirname(process.execPath);
-const DESKTOP_RUNTIME_CHECK_REV = "runtime-check-r6-20260509";
+const DESKTOP_RUNTIME_CHECK_REV = "runtime-check-r7-20260510";
 
 let mainWindow = null;
 let serverProcess = null;
@@ -465,52 +465,99 @@ async function collectStartupDiagnostics(url) {
   return diagnostics;
 }
 
+function requestServerPath(url, pathname, timeoutMessage) {
+  return new Promise((resolve, reject) => {
+    const request = http.get(`${url}${pathname}`, (response) => {
+      let body = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => {
+        body += chunk;
+      });
+      response.on("end", () => {
+        resolve({
+          statusCode: response.statusCode,
+          body: body.trim().slice(0, 1000),
+          path: pathname,
+        });
+      });
+    });
+
+    request.on("error", reject);
+    request.setTimeout(2000, () => {
+      request.destroy(new Error(timeoutMessage));
+    });
+  });
+}
+
+async function probeServerReadiness(url) {
+  const readyResult = await requestServerPath(url, "api/ready", "ready 请求超时").catch((error) => ({
+    error,
+    path: "api/ready",
+  }));
+
+  if (readyResult.statusCode === 200) {
+    return {
+      ok: true,
+      strategy: "ready",
+      result: readyResult,
+    };
+  }
+
+  const indexResult = await requestServerPath(url, "", "首页请求超时").catch((error) => ({
+    error,
+    path: "/",
+  }));
+
+  if (indexResult.statusCode === 200) {
+    return {
+      ok: true,
+      strategy: "index",
+      result: indexResult,
+      readyResult,
+    };
+  }
+
+  return {
+    ok: false,
+    readyResult,
+    indexResult,
+  };
+}
+
+function formatProbeFailure(result) {
+  if (!result) {
+    return "无响应";
+  }
+  if (result.error) {
+    return `${result.path}: ${result.error.message}`;
+  }
+  return result.body ? `${result.path}: HTTP ${result.statusCode}: ${result.body}` : `${result.path}: HTTP ${result.statusCode}`;
+}
+
 function waitForServer(url, timeoutMs = 30000) {
   const startedAt = Date.now();
   let attempts = 0;
   let lastFailure = "";
 
   return new Promise((resolve, reject) => {
-    const attempt = () => {
-      let completed = false;
-
-      const failOnce = (reason) => {
-        if (completed) {
-          return;
-        }
-        completed = true;
-        retryOrFail(reason);
-      };
-
-      const request = http.get(`${url}api/ready`, (response) => {
-        if (response.statusCode === 200) {
-          let body = "";
-          response.setEncoding("utf8");
-          response.on("data", (chunk) => {
-            body += chunk;
-          });
-          response.on("end", () => {
-            completed = true;
-            logInfo("local server ready check succeeded", { attempts, statusCode: response.statusCode, body: body.trim() });
-            resolve();
-          });
-          return;
-        }
-        let body = "";
-        response.setEncoding("utf8");
-        response.on("data", (chunk) => {
-          body += chunk;
+    const attempt = async () => {
+      const result = await probeServerReadiness(url);
+      if (result.ok) {
+        logInfo("local server readiness check succeeded", {
+          attempts,
+          strategy: result.strategy,
+          statusCode: result.result.statusCode,
+          body: result.result.body,
+          readyFallback: result.readyResult ? formatProbeFailure(result.readyResult) : null,
         });
-        response.on("end", () => {
-          const snippet = body.trim().slice(0, 1000);
-          failOnce(snippet ? `HTTP ${response.statusCode}: ${snippet}` : `HTTP ${response.statusCode}`);
-        });
-      });
+        resolve();
+        return;
+      }
 
-      request.on("error", (error) => failOnce(error.message));
-      request.setTimeout(2000, () => {
-        request.destroy(new Error("ready 请求超时"));
-      });
+      retryOrFail([
+        formatProbeFailure(result.readyResult),
+        formatProbeFailure(result.indexResult),
+      ].join(" | "));
     };
 
     const retryOrFail = (reason = "") => {
