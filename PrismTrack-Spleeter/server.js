@@ -690,6 +690,7 @@ async function downloadModel(modelId, downloadState) {
     const checksum = await fetchModelChecksum(modelName);
     const archiveUrl = buildModelArchiveUrl(modelName);
     downloadState.url = archiveUrl;
+    console.log(`[Model] Download ${modelId} from ${archiveUrl}`);
     await downloadFileWithProgress(archiveUrl, archivePath, partialPath, downloadState);
     const actualChecksum = await sha256File(archivePath);
     if (checksum && actualChecksum !== checksum) {
@@ -699,13 +700,16 @@ async function downloadModel(modelId, downloadState) {
     }
     downloadState.status = "extracting";
     downloadState.progress = Math.max(downloadState.progress, 96);
+    console.log(`[Model] Extract ${modelId} archive=${archivePath} target=${targetDir}`);
     await extractTarGz(archivePath, targetDir);
     await writeModelProbe(targetDir);
     downloadState.status = "completed";
     downloadState.progress = 100;
+    console.log(`[Model] Ready ${modelId} target=${targetDir}`);
   } catch (error) {
     downloadState.status = "error";
     downloadState.error = error.message;
+    console.error(`[Model] Download failed ${modelId}:`, error);
     throw Object.assign(new Error(`模型下载失败: ${error.message}`), { code: "model_not_ready" });
   } finally {
     await unlink(archivePath).catch(() => {});
@@ -754,12 +758,18 @@ async function repairAndDownloadModel(modelId, downloadState) {
 
 async function fetchModelChecksum(modelName) {
   const url = buildModelChecksumUrl();
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`无法获取模型校验文件: ${response.status}`);
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      console.warn(`[Model] Skip checksum for ${modelName}: ${response.status}`);
+      return null;
+    }
+    const index = await response.json();
+    return index[modelName] || null;
+  } catch (error) {
+    console.warn(`[Model] Skip checksum for ${modelName}: ${error.message}`);
+    return null;
   }
-  const index = await response.json();
-  return index[modelName] || null;
 }
 
 async function downloadFileWithProgress(url, targetPath, partialPath, downloadState) {
@@ -773,6 +783,9 @@ async function downloadFileWithProgress(url, targetPath, partialPath, downloadSt
   const partialStat = await stat(partialPath).catch(() => null);
   const resumeBytes = partialStat?.isFile() ? partialStat.size : 0;
   const headers = resumeBytes > 0 ? { Range: `bytes=${resumeBytes}-` } : undefined;
+  if (resumeBytes > 0) {
+    console.log(`[Model] Resume download ${url} from byte ${resumeBytes}`);
+  }
   const response = await fetch(url, headers ? { headers } : undefined);
   if (response.status === 416 && resumeBytes > 0) {
     await rename(partialPath, targetPath);

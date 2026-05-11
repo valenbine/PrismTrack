@@ -164,3 +164,12 @@ Agent 在任务执行过程中发现的条目应遵循以下格式：
   - 前端轮询任务状态时，downloading 状态不计入分离处理超时尝试次数；只有 queued/processing/error 等非下载阶段参与处理超时判断
   - 模型下载使用 APP_RUNTIME_DIR/model-downloads 下稳定命名的 .tar.gz.part 临时文件，完成后重命名为 .tar.gz，以支持中断后续传
   - 模型下载续传应使用 HTTP Range 请求，服务端返回 206 时追加写入，返回 200 时重下，返回 416 且本地 part 存在时按已完成文件进入校验流程
+
+[PrismTrack 模型下载错误展示约定]
+- Date: 2026-05-11
+- Context: Agent 在处理模型下载失败后前端只显示模型缺文件时发现
+- Category: 代码模式
+- Instructions:
+  - fetchModelChecksum 失败不应阻断模型下载，应记录 warning 并在无 checksum 时继续下载与解压
+  - 模型下载失败时应把 modelDownload.error 传给前端优先展示，避免用通用缺文件文案掩盖真实网络、校验或解压错误
+  - 后端模型下载流程应记录下载 URL、续传 byte、解压目标与失败堆栈，便于通过桌面日志定位问题

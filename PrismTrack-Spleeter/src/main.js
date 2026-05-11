@@ -527,6 +527,11 @@ async function pollJobStatus(jobId) {
 }
 
 function formatModelNotReadyMessage(payload) {
+  const downloadError = payload.modelDownload?.error || payload.error;
+  if (downloadError) {
+    return downloadError;
+  }
+
   const model = payload.effectiveModel || payload.model || "当前模型";
   const cache = payload.modelCache || payload.cache || {};
   const directory = cache.directory || payload.modelPath || "未提供目录";
