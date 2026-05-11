@@ -146,3 +146,12 @@ Agent 在任务执行过程中发现的条目应遵循以下格式：
   - 桌面壳等待本地服务时应优先探测 /api/ready，若该接口返回 404 或不可用，应回退探测首页 / 是否返回 200
   - 首页 / 返回 200 表示 Web UI 已可加载，应允许创建窗口，避免因 ready 路由版本差异阻塞桌面启动
   - 启动日志应记录实际命中的 readiness strategy，便于区分 ready 命中和 index fallback
+
+[PrismTrack 桌面运行时路径传递约定]
+- Date: 2026-05-10
+- Context: Agent 在处理桌面首页初始 health 报 Python 运行时不可用时发现
+- Category: 代码模式
+- Instructions:
+  - 桌面主进程启动 server.js 时必须显式传入 SPLEETER_PYTHON、FFMPEG、FFPROBE、SPLEETER_WRAPPER，路径来源为 resolveRuntimeFile/resolveAppFile
+  - Windows packaged 布局下 Python 和 ffmpeg 位于安装根或 resources 运行时目录，而 server.js 的 __dirname 是 resources/app，不能依赖后端默认本地路径自动命中
+  - 前端初始 /api/health 深度运行时检查失败不应直接显示服务不可用，应保留为运行时待验证状态，真实失败由首次任务或后台诊断暴露

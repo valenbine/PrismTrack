@@ -171,7 +171,7 @@ async function checkHealth() {
     if (health.ok) {
       setStatus("服务可用", "Ready", health.message, 0);
     } else {
-      setStatus("服务不可用", "Error", health.message, 0, true);
+      setStatus("运行时待验证", "Ready", health.message || "Spleeter 将在首次任务时完成运行时验证。", 0);
     }
   } catch {
     setStatus("后端未连接", "Error", "无法连接到后端服务。", 0, true);

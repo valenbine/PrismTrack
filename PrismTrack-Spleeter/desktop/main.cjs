@@ -9,7 +9,7 @@ const codeRoot = isDev ? path.resolve(__dirname, "..") : app.getAppPath();
 const entryUrl = process.env.PRISMTRACK_DESKTOP_URL || "http://127.0.0.1:8000/";
 const serverPort = Number(new URL(entryUrl).port || 8000);
 const installRoot = isDev ? codeRoot : path.dirname(process.execPath);
-const DESKTOP_RUNTIME_CHECK_REV = "runtime-check-r7-20260510";
+const DESKTOP_RUNTIME_CHECK_REV = "runtime-check-r8-20260510";
 
 let mainWindow = null;
 let serverProcess = null;
@@ -131,6 +131,9 @@ function resolveAppFile(relativePath) {
 
 function buildServerEnv() {
   const wrapperPath = resolveAppFile(path.join("scripts", "spleeter_separate.py"));
+  const pythonPath = resolveRuntimeFile(path.join("python", "python.exe"));
+  const ffmpegPath = resolveRuntimeFile("ffmpeg.exe");
+  const ffprobePath = resolveRuntimeFile("ffprobe.exe");
 
   return {
     ...process.env,
@@ -139,6 +142,9 @@ function buildServerEnv() {
     APP_RUNTIME_DIR: path.join(app.getPath("userData"), ".runtime"),
     SPLEETER_MODEL_PATH: path.join(app.getPath("userData"), "pretrained_models"),
     SPLEETER_WRAPPER: wrapperPath,
+    SPLEETER_PYTHON: pythonPath,
+    FFMPEG: ffmpegPath,
+    FFPROBE: ffprobePath,
   };
 }
 
@@ -331,6 +337,9 @@ function startServer() {
     electronRunAsNode: serverEnv.ELECTRON_RUN_AS_NODE,
     port: serverEnv.PORT,
     wrapper: serverEnv.SPLEETER_WRAPPER,
+    python: serverEnv.SPLEETER_PYTHON,
+    ffmpeg: serverEnv.FFMPEG,
+    ffprobe: serverEnv.FFPROBE,
     modelPath: serverEnv.SPLEETER_MODEL_PATH,
     appRuntimeDir: serverEnv.APP_RUNTIME_DIR,
   });
