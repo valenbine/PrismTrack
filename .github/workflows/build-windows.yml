@@ -10,11 +10,6 @@ on:
     paths:
       - ".github/workflows/build-windows.yml"
       - "PrismTrack-Spleeter/**"
-  pull_request:
-    paths:
-      - ".github/workflows/build-windows.yml"
-      - "PrismTrack-Spleeter/**"
-
 jobs:
   build-windows:
     runs-on: windows-latest

@@ -182,3 +182,11 @@ Agent 在任务执行过程中发现的条目应遵循以下格式：
   - Node fetch 下载 GitHub 模型若因证书链问题失败，应回退到系统 curl.exe 下载，以使用 Windows 系统证书链
   - curl 兜底下载同样写入 model-downloads 下的 .tar.gz.part，并使用 --continue-at - 保留断点续传能力
   - runCommand 需要支持 timeoutMs=0 表示不设置命令超时，避免大模型下载被子进程超时杀死
+
+[PrismTrack Windows 打包触发约定]
+- Date: 2026-05-11
+- Context: Agent 在处理 pull_request 事件重复 Windows 打包且 PR run npm ci 失败时发现
+- Category: 构建方法
+- Instructions:
+  - Build PrismTrack Windows workflow 仅通过 push 和 workflow_dispatch 触发，不使用 pull_request 触发
+  - Windows 安装包产物以 push run 为准，避免同一提交在 PR 事件重复打包并产生重复 artifacts 或偶发依赖安装失败
