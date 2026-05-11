@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
-import { mkdir as mkdirAsync, stat, rm, readdir, unlink } from "node:fs/promises";
+import { mkdir as mkdirAsync, rename, stat, rm, readdir, unlink } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import http from "node:http";
@@ -680,7 +680,7 @@ async function ensureModelReady(modelId, onProgress) {
 async function downloadModel(modelId, downloadState) {
   const modelName = getModelFolderName(modelId);
   const targetDir = path.join(MODEL_PATH, modelName);
-  const archivePath = path.join(MODEL_DOWNLOAD_DIR, `${modelName}-${Date.now()}.tar.gz`);
+  const { archivePath, partialPath } = getModelArchivePaths(modelName);
 
   downloadState.status = "downloading";
   downloadState.progress = 1;
@@ -690,9 +690,11 @@ async function downloadModel(modelId, downloadState) {
     const checksum = await fetchModelChecksum(modelName);
     const archiveUrl = buildModelArchiveUrl(modelName);
     downloadState.url = archiveUrl;
-    await downloadFileWithProgress(archiveUrl, archivePath, downloadState);
+    await downloadFileWithProgress(archiveUrl, archivePath, partialPath, downloadState);
     const actualChecksum = await sha256File(archivePath);
     if (checksum && actualChecksum !== checksum) {
+      await unlink(archivePath).catch(() => {});
+      await unlink(partialPath).catch(() => {});
       throw new Error("下载的模型校验失败，请重试");
     }
     downloadState.status = "extracting";
@@ -760,17 +762,48 @@ async function fetchModelChecksum(modelName) {
   return index[modelName] || null;
 }
 
-async function downloadFileWithProgress(url, targetPath, downloadState) {
-  const response = await fetch(url);
+async function downloadFileWithProgress(url, targetPath, partialPath, downloadState) {
+  const completedStat = await stat(targetPath).catch(() => null);
+  if (completedStat?.isFile() && completedStat.size > 0) {
+    downloadState.downloadedBytes = completedStat.size;
+    downloadState.resumedBytes = completedStat.size;
+    return;
+  }
+
+  const partialStat = await stat(partialPath).catch(() => null);
+  const resumeBytes = partialStat?.isFile() ? partialStat.size : 0;
+  const headers = resumeBytes > 0 ? { Range: `bytes=${resumeBytes}-` } : undefined;
+  const response = await fetch(url, headers ? { headers } : undefined);
+  if (response.status === 416 && resumeBytes > 0) {
+    await rename(partialPath, targetPath);
+    downloadState.downloadedBytes = resumeBytes;
+    downloadState.resumedBytes = resumeBytes;
+    return;
+  }
+
   if (!response.ok || !response.body) {
     throw new Error(`模型下载失败: ${response.status}`);
   }
 
-  const totalBytes = Number(response.headers.get("content-length") || 0);
-  downloadState.totalBytes = totalBytes;
-  const writer = createWriteStream(targetPath);
-  const reader = response.body.getReader();
   let downloadedBytes = 0;
+  let totalBytes = Number(response.headers.get("content-length") || 0);
+  let append = false;
+
+  if (resumeBytes > 0 && response.status === 206) {
+    append = true;
+    downloadedBytes = resumeBytes;
+    totalBytes = parseContentRangeTotal(response.headers.get("content-range")) || totalBytes + resumeBytes;
+    downloadState.resumedBytes = resumeBytes;
+  } else if (resumeBytes > 0) {
+    await unlink(partialPath).catch(() => {});
+    downloadState.resumedBytes = 0;
+  }
+
+  downloadState.totalBytes = totalBytes;
+  downloadState.downloadedBytes = downloadedBytes;
+  downloadState.resumeSupported = response.status === 206 || resumeBytes === 0;
+  const writer = createWriteStream(partialPath, { flags: append ? "a" : "w" });
+  const reader = response.body.getReader();
 
   try {
     while (true) {
@@ -789,10 +822,20 @@ async function downloadFileWithProgress(url, targetPath, downloadState) {
     }
     writer.end();
     await once(writer, "finish");
+    await rename(partialPath, targetPath);
   } catch (error) {
     writer.destroy();
     throw error;
   }
+}
+
+function parseContentRangeTotal(contentRange) {
+  if (!contentRange) {
+    return 0;
+  }
+
+  const match = /\/(\d+)$/.exec(contentRange);
+  return match ? Number(match[1]) : 0;
 }
 
 async function extractTarGz(archivePath, targetDir) {
@@ -817,10 +860,20 @@ function createModelDownloadState(modelId) {
     progress: 0,
     downloadedBytes: 0,
     totalBytes: 0,
+    resumedBytes: 0,
+    resumeSupported: false,
     error: null,
     attempt: 0,
     maxAttempts: MODEL_DOWNLOAD_MAX_ATTEMPTS,
     startedAt: Date.now(),
+  };
+}
+
+function getModelArchivePaths(modelName) {
+  const archivePath = path.join(MODEL_DOWNLOAD_DIR, `${modelName}.tar.gz`);
+  return {
+    archivePath,
+    partialPath: `${archivePath}.part`,
   };
 }
 

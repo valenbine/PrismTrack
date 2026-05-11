@@ -252,12 +252,18 @@ function getModelStateLabel(model) {
 function formatDownloadAttemptSuffix(download) {
   const attempt = Number(download?.attempt || 0);
   const maxAttempts = Number(download?.maxAttempts || 0);
+  const resumedBytes = Number(download?.resumedBytes || 0);
+  const parts = [];
 
   if (attempt > 0 && maxAttempts > 0) {
-    return `第${attempt}/${maxAttempts}次`;
+    parts.push(`第${attempt}/${maxAttempts}次`);
   }
 
-  return "";
+  if (resumedBytes > 0) {
+    parts.push(`已续传 ${formatBytes(resumedBytes)}`);
+  }
+
+  return parts.join("，");
 }
 
 function isModelTemporarilyUnavailable(model) {
@@ -497,7 +503,6 @@ async function pollJobStatus(jobId) {
           formatModelDownloadMessage(status),
           Math.max(5, Math.min(50, Math.round((status.progress || downloadProgress || 5))))
         );
-        attempts++;
         modelRefreshMode = "active";
         scheduleModelRefresh();
         setTimeout(poll, 1000);

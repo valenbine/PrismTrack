@@ -155,3 +155,12 @@ Agent 在任务执行过程中发现的条目应遵循以下格式：
   - 桌面主进程启动 server.js 时必须显式传入 SPLEETER_PYTHON、FFMPEG、FFPROBE、SPLEETER_WRAPPER，路径来源为 resolveRuntimeFile/resolveAppFile
   - Windows packaged 布局下 Python 和 ffmpeg 位于安装根或 resources 运行时目录，而 server.js 的 __dirname 是 resources/app，不能依赖后端默认本地路径自动命中
   - 前端初始 /api/health 深度运行时检查失败不应直接显示服务不可用，应保留为运行时待验证状态，真实失败由首次任务或后台诊断暴露
+
+[PrismTrack 模型下载与分离超时约定]
+- Date: 2026-05-11
+- Context: Agent 在处理模型下载耗时导致前端误报分离超时时发现
+- Category: 代码模式
+- Instructions:
+  - 前端轮询任务状态时，downloading 状态不计入分离处理超时尝试次数；只有 queued/processing/error 等非下载阶段参与处理超时判断
+  - 模型下载使用 APP_RUNTIME_DIR/model-downloads 下稳定命名的 .tar.gz.part 临时文件，完成后重命名为 .tar.gz，以支持中断后续传
+  - 模型下载续传应使用 HTTP Range 请求，服务端返回 206 时追加写入，返回 200 时重下，返回 416 且本地 part 存在时按已完成文件进入校验流程
