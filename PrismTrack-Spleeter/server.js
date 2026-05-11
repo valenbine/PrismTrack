@@ -872,10 +872,13 @@ async function downloadFileWithCurl(url, targetPath, partialPath, downloadState)
   const args = [
     "--location",
     "--fail",
+    "--silent",
+    "--show-error",
     "--retry",
     "3",
     "--retry-delay",
     "2",
+    "--ssl-no-revoke",
     "--continue-at",
     "-",
     "--output",

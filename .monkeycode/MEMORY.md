@@ -182,6 +182,8 @@ Agent 在任务执行过程中发现的条目应遵循以下格式：
   - Node fetch 下载 GitHub 模型若因证书链问题失败，应回退到系统 curl.exe 下载，以使用 Windows 系统证书链
   - curl 兜底下载同样写入 model-downloads 下的 .tar.gz.part，并使用 --continue-at - 保留断点续传能力
   - runCommand 需要支持 timeoutMs=0 表示不设置命令超时，避免大模型下载被子进程超时杀死
+  - Windows curl Schannel 若报 CRYPT_E_NO_REVOCATION_CHECK，应使用 --ssl-no-revoke 跳过吊销检查，同时保留常规证书校验
+  - curl 下载应使用 --silent --show-error，避免进度条污染桌面日志
 
 [PrismTrack Windows 打包触发约定]
 - Date: 2026-05-11
