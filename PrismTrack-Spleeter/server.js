@@ -553,10 +553,12 @@ function runCommand(command, args, timeoutMs, extraEnv = {}) {
     const child = spawn(command, args, { cwd: APP_RUNTIME_DIR, env: { ...process.env, ...extraEnv } });
     let stdout = "";
     let stderr = "";
-    const timer = setTimeout(() => {
-      child.kill("SIGTERM");
-      resolve({ code: -1, stdout, stderr, error: "Command timeout" });
-    }, timeoutMs);
+    const timer = timeoutMs > 0
+      ? setTimeout(() => {
+          child.kill("SIGTERM");
+          resolve({ code: -1, stdout, stderr, error: "Command timeout" });
+        }, timeoutMs)
+      : null;
 
     child.stdout?.on("data", (chunk) => {
       stdout += chunk.toString();
@@ -565,11 +567,11 @@ function runCommand(command, args, timeoutMs, extraEnv = {}) {
       stderr += chunk.toString();
     });
     child.on("error", (error) => {
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       resolve({ code: -1, stdout, stderr, error: error.message });
     });
     child.on("close", (code) => {
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       resolve({ code, stdout, stderr });
     });
   });
@@ -691,7 +693,15 @@ async function downloadModel(modelId, downloadState) {
     const archiveUrl = buildModelArchiveUrl(modelName);
     downloadState.url = archiveUrl;
     console.log(`[Model] Download ${modelId} from ${archiveUrl}`);
-    await downloadFileWithProgress(archiveUrl, archivePath, partialPath, downloadState);
+    try {
+      await downloadFileWithProgress(archiveUrl, archivePath, partialPath, downloadState);
+    } catch (error) {
+      if (!shouldFallbackToCurl(error)) {
+        throw error;
+      }
+      console.warn(`[Model] Native fetch failed for ${modelId}, fallback to curl: ${error.message}`);
+      await downloadFileWithCurl(archiveUrl, archivePath, partialPath, downloadState);
+    }
     const actualChecksum = await sha256File(archivePath);
     if (checksum && actualChecksum !== checksum) {
       await unlink(archivePath).catch(() => {});
@@ -849,6 +859,51 @@ function parseContentRangeTotal(contentRange) {
 
   const match = /\/(\d+)$/.exec(contentRange);
   return match ? Number(match[1]) : 0;
+}
+
+function shouldFallbackToCurl(error) {
+  const text = `${error?.message || ""}\n${error?.cause?.message || ""}\n${error?.cause?.code || ""}`;
+  return /fetch failed|certificate|UNABLE_TO_VERIFY|SELF_SIGNED|CERT_/i.test(text);
+}
+
+async function downloadFileWithCurl(url, targetPath, partialPath, downloadState) {
+  const partialStat = await stat(partialPath).catch(() => null);
+  const resumeBytes = partialStat?.isFile() ? partialStat.size : 0;
+  const args = [
+    "--location",
+    "--fail",
+    "--retry",
+    "3",
+    "--retry-delay",
+    "2",
+    "--continue-at",
+    "-",
+    "--output",
+    partialPath,
+    url,
+  ];
+
+  if (resumeBytes > 0) {
+    downloadState.resumedBytes = resumeBytes;
+    downloadState.downloadedBytes = resumeBytes;
+    console.log(`[Model] Curl resume download ${url} from byte ${resumeBytes}`);
+  }
+
+  const result = await runCommand("curl.exe", args, 0);
+  if (result.code !== 0) {
+    throw new Error(result.stderr || result.stdout || "curl 下载模型失败");
+  }
+
+  const finalStat = await stat(partialPath).catch(() => null);
+  if (!finalStat?.isFile() || finalStat.size <= 0) {
+    throw new Error("curl 下载模型失败: 未生成有效归档文件");
+  }
+
+  downloadState.downloadedBytes = finalStat.size;
+  downloadState.totalBytes = Math.max(downloadState.totalBytes || 0, finalStat.size);
+  downloadState.progress = 95;
+  downloadState.resumeSupported = true;
+  await rename(partialPath, targetPath);
 }
 
 async function extractTarGz(archivePath, targetDir) {

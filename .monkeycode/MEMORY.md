@@ -173,3 +173,12 @@ Agent 在任务执行过程中发现的条目应遵循以下格式：
   - fetchModelChecksum 失败不应阻断模型下载，应记录 warning 并在无 checksum 时继续下载与解压
   - 模型下载失败时应把 modelDownload.error 传给前端优先展示，避免用通用缺文件文案掩盖真实网络、校验或解压错误
   - 后端模型下载流程应记录下载 URL、续传 byte、解压目标与失败堆栈，便于通过桌面日志定位问题
+
+[PrismTrack Windows 模型下载 TLS 兜底]
+- Date: 2026-05-11
+- Context: Agent 在处理 Windows 桌面模型下载 fetch 报 UNABLE_TO_VERIFY_LEAF_SIGNATURE 时发现
+- Category: 代码模式
+- Instructions:
+  - Node fetch 下载 GitHub 模型若因证书链问题失败，应回退到系统 curl.exe 下载，以使用 Windows 系统证书链
+  - curl 兜底下载同样写入 model-downloads 下的 .tar.gz.part，并使用 --continue-at - 保留断点续传能力
+  - runCommand 需要支持 timeoutMs=0 表示不设置命令超时，避免大模型下载被子进程超时杀死
