@@ -120,6 +120,7 @@
 **/.cache/
 **/.runtime/
 **/pretrained_models/
+/python/
 **/tmp/
 **/temp/
 
