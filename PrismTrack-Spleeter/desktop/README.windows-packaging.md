@@ -1,55 +1,82 @@
 # PrismTrack Windows Packaging
 
-本目录用于在不改动原有 Web 业务代码的前提下，为 PrismTrack 提供 Windows 桌面封装层。
+## Current Status
 
-## 封装方式
+This repository now includes a minimal Electron desktop host at `desktop/main.cjs`.
 
-- 使用 Electron 作为桌面壳
-- 应用启动后自动拉起本地 `server.js`
-- 使用 NSIS 生成安装包
-- 安装时允许用户自定义安装路径
-- 应用内外链通过系统默认浏览器打开
+Its responsibilities are intentionally narrow:
 
-## 关键文件
+- start the local `server.js` process
+- wait for `GET /api/ready`, with `/` as a fallback readiness check
+- open the Web UI inside an Electron window
+- open external links in the default Windows browser
+- write startup diagnostics to the Electron `userData` log directory
 
-- `desktop/main.cjs`: Electron 主进程，负责启动本地服务与窗口
-- `.github/workflows/build-windows.yml`: GitHub Actions Windows 打包工作流
-- `scripts/generate-icons.cjs`: 生成标准尺寸 PNG 与 `.ico` 图标集
+## Required Runtime Layout
 
-## 图标输出
+The CI workflow hydrates the Windows runtime from the `SpleeterGUI 2.9.4.0` release before packaging. A local build needs the same runtime layout under `PrismTrack-Spleeter/`:
 
-执行以下命令可生成 Windows 封装所需图标：
-
-```bash
-npm run generate:icons
+```text
+PrismTrack-Spleeter/
+  ffmpeg.exe
+  ffprobe.exe
+  ffplay.exe
+  python/
+    python.exe
+    python37.dll
+    Lib/
+    Scripts/
 ```
 
-输出目录：`build/icons/`
+The desktop host passes these paths to `server.js` through `SPLEETER_PYTHON`, `FFMPEG`, `FFPROBE`, and `SPLEETER_WRAPPER`.
 
-包含尺寸：`16, 24, 32, 48, 64, 128, 256`
+## Installer Behavior
 
-## 桌面诊断模式
+The current `electron-builder` configuration is set up for:
 
-桌面版支持通过应用级参数 `--prism-debug` 开启诊断模式。
+- product name: `PrismTrack`
+- target: `nsis`
+- selectable install directory
+- unpacked application files (`asar: false`)
+- model weights excluded from the installer
 
-示例：
+## Important Notes
 
-```bash
-PrismTrack.exe --prism-debug
+1. The repository does not commit the Windows Python runtime.
+2. The repository does not commit `ffmpeg.exe`, `ffprobe.exe`, or `ffplay.exe`.
+3. GitHub Actions downloads and injects those runtime files during packaging.
+4. Local `npm run dist:win` requires the runtime files to exist locally first.
+5. Model weights are intentionally not bundled. They are downloaded on demand at runtime.
+
+## Model Download Behavior
+
+The desktop build stores model weights under Electron `userData`:
+
+```text
+%APPDATA%\prismtrack-spleeter\pretrained_models
 ```
 
-启用后会执行以下行为：
+Temporary model archives are stored under:
 
-- 窗口加载地址自动变为 `http://127.0.0.1:8000/?debug=1`
-- 页面内调试反馈区域默认启用
-- Electron 主进程日志会写入本地日志文件
-- 后端会输出每次 Spleeter 的实际执行命令、stdout/stderr、扫描到的 wav 文件清单和最终 stem 映射
+```text
+%APPDATA%\prismtrack-spleeter\.runtime\model-downloads
+```
 
-日志文件位置：
+Downloads use stable `.tar.gz.part` files for resume support. If Node `fetch` fails on Windows because of TLS certificate chain issues, the backend falls back to system `curl.exe` with `--continue-at -` and `--ssl-no-revoke`.
 
-- `C:\Users\<用户名>\AppData\Roaming\PrismTrack\logs\desktop.log`
+## Diagnostics
 
-当需要排查安装版分轨问题时，优先提供：
+Startup logs are written to:
 
-- 页面调试反馈中的 `文件=...` 内容
-- `desktop.log` 的最新相关片段
+```text
+%APPDATA%\prismtrack-spleeter\logs\desktop.log
+```
+
+The log records runtime roots, resolved Python/ffmpeg paths, server stdout/stderr, readiness strategy, and model download failures.
+
+## Recommended Next Steps
+
+1. Copy the validated Windows runtime from the chosen reference baseline for local builds, or use GitHub Actions for CI builds.
+2. Install project dev dependencies with `npm ci`.
+3. Run `npm run desktop` for local desktop verification.
+4. Run `npm run dist:win` to produce the installer.
