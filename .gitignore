@@ -118,6 +118,7 @@
 *.backup
 *.cache
 **/.cache/
+**/.runtime/
 **/tmp/
 **/temp/
 

@@ -32,6 +32,8 @@ const pollDebugToggle = document.querySelector("#poll-debug-toggle");
 const stemsLoadStatus = document.querySelector("#stems-load-status");
 const masterProgress = document.querySelector("#master-progress");
 const USE_BUFFER_PLAYBACK = true;
+const MODEL_REFRESH_IDLE_MS = 10000;
+const MODEL_REFRESH_ACTIVE_MS = 1500;
 let debugPollingEnabled = new URLSearchParams(window.location.search).get("debug") === "1";
 
 let selectedFile = null;
@@ -60,6 +62,9 @@ let stemControlState = {};
 let playbackState = "idle";
 let stemWaveformCache = {};
 let stemBufferPromiseCache = {};
+let modelRefreshTimerId = null;
+let modelRefreshMode = "idle";
+let availableModelsMeta = [];
 
 function initAudioContext() {
   if (!audioContext) {
@@ -72,6 +77,7 @@ function initAudioContext() {
 
 checkHealth();
 loadModels();
+scheduleModelRefresh();
 setupDebugPanel();
 
 if (pollDebugToggle) {
@@ -165,7 +171,7 @@ async function checkHealth() {
     if (health.ok) {
       setStatus("服务可用", "Ready", health.message, 0);
     } else {
-      setStatus("服务不可用", "Error", health.message, 0, true);
+      setStatus("运行时待验证", "Ready", health.message || "Spleeter 将在首次任务时完成运行时验证。", 0);
     }
   } catch {
     setStatus("后端未连接", "Error", "无法连接到后端服务。", 0, true);
@@ -174,17 +180,94 @@ async function checkHealth() {
 
 async function loadModels() {
   try {
+    const selectedModel = modelSelect.value;
     const response = await fetch("/api/models");
     const data = await response.json();
     if (data.models && data.models.length > 0) {
+      availableModelsMeta = data.models;
       modelSelect.innerHTML = data.models
-        .map((m) => `<option value="${m.id}">${m.name}</option>`)
+        .map((m) => `<option value="${m.id}" ${isModelTemporarilyUnavailable(m) ? "disabled" : ""}>${formatModelOptionLabel(m)}</option>`)
         .join("");
+
+      if (selectedModel && data.models.some((model) => model.id === selectedModel)) {
+        modelSelect.value = selectedModel;
+      }
+
       applyModelModeRules("mode");
+
+      if (selectedFile) {
+        modelUsed.textContent = modelSelect.options[modelSelect.selectedIndex]?.text.split(" ")[0] || "spleeter:2stems";
+      }
     }
   } catch (e) {
     console.error("Failed to load models:", e);
+  } finally {
+    scheduleModelRefresh();
   }
+}
+
+function scheduleModelRefresh() {
+  if (modelRefreshTimerId) {
+    clearTimeout(modelRefreshTimerId);
+  }
+
+  const delay = modelRefreshMode === "active"
+    ? MODEL_REFRESH_ACTIVE_MS
+    : MODEL_REFRESH_IDLE_MS;
+
+  modelRefreshTimerId = setTimeout(() => {
+    loadModels();
+  }, delay);
+}
+
+function formatModelOptionLabel(model) {
+  const stateLabel = getModelStateLabel(model);
+  const suffix = stateLabel ? ` [${stateLabel}]` : "";
+  return `${model.name}${suffix}`;
+}
+
+function getModelStateLabel(model) {
+  if (model?.state?.code === "downloading") {
+    const downloadStatus = model.download?.status;
+    const progress = Number(model.download?.progress || 0);
+    const retryText = formatDownloadAttemptSuffix(model.download);
+    const retrySuffix = retryText ? `（${retryText}）` : "";
+
+    if (downloadStatus === "extracting") {
+      return `解压中${retrySuffix}`;
+    }
+
+    if (downloadStatus === "repairing") {
+      return `修复中${retrySuffix}`;
+    }
+
+    if (progress > 0) {
+      return `下载中 ${progress}%${retrySuffix}`;
+    }
+  }
+
+  return model.state?.label || "";
+}
+
+function formatDownloadAttemptSuffix(download) {
+  const attempt = Number(download?.attempt || 0);
+  const maxAttempts = Number(download?.maxAttempts || 0);
+  const resumedBytes = Number(download?.resumedBytes || 0);
+  const parts = [];
+
+  if (attempt > 0 && maxAttempts > 0) {
+    parts.push(`第${attempt}/${maxAttempts}次`);
+  }
+
+  if (resumedBytes > 0) {
+    parts.push(`已续传 ${formatBytes(resumedBytes)}`);
+  }
+
+  return parts.join("，");
+}
+
+function isModelTemporarilyUnavailable(model) {
+  return model?.state?.code === "downloading" || model?.state?.code === "corrupted";
 }
 
 function applyModelModeRules(trigger = "mode") {
@@ -207,19 +290,34 @@ function applyModelModeRules(trigger = "mode") {
   const options = Array.from(modelSelect.options);
 
   options.forEach((option) => {
-    option.disabled = !allowed.includes(option.value);
+    const modelMeta = availableModelsMeta.find((model) => model.id === option.value);
+    option.disabled = !allowed.includes(option.value) || isModelTemporarilyUnavailable(modelMeta);
   });
 
-  if (!allowed.includes(modelSelect.value)) {
-    modelSelect.value = allowed[0] || "spleeter:2stems";
+  const enabledAllowed = options.filter((option) => allowed.includes(option.value) && !option.disabled);
+
+  if (!allowed.includes(modelSelect.value) || modelSelect.options[modelSelect.selectedIndex]?.disabled) {
+    modelSelect.value = enabledAllowed[0]?.value || allowed[0] || "spleeter:2stems";
   }
 
   updateStemVisibility(separationModeSelect.value, availableStemNames);
   updateModelHint();
+  updateSeparateAvailability();
 }
 
 function updateModelHint() {
   const mode = separationModeSelect.value;
+  const selectedMeta = availableModelsMeta.find((model) => model.id === modelSelect.value);
+
+  if (selectedMeta?.state?.code === "downloading") {
+    modelHint.textContent = `${selectedMeta.name} 当前${getModelStateLabel(selectedMeta)}，暂时不可选择。`;
+    return;
+  }
+
+  if (selectedMeta?.state?.code === "corrupted") {
+    modelHint.textContent = `${selectedMeta.name} 当前模型文件损坏，等待自动修复后可用。`;
+    return;
+  }
 
   if (mode === "six") {
     modelHint.textContent = "5轨模式仅支持 spleeter:5stems。";
@@ -238,6 +336,7 @@ function setSelectedFile(file) {
   selectedFile = file;
   currentJobId = null;
   resetStemStates();
+  scheduleModelRefresh();
 
   if (!file) {
     fileMeta.hidden = true;
@@ -251,8 +350,8 @@ function setSelectedFile(file) {
   fileMeta.hidden = false;
   fileMeta.textContent = `${file.name} · ${formatBytes(file.size)}`;
   fileName.textContent = truncateFileName(file.name);
-  separateButton.disabled = false;
   modelUsed.textContent = modelSelect.options[modelSelect.selectedIndex]?.text.split(" ")[0] || "spleeter:2stems";
+  updateSeparateAvailability();
 
   loadAudioPreview(file);
   setStatus("音频已选择", "Ready", "点击开始分轨后将使用选中的模型进行分离。", 0);
@@ -310,6 +409,7 @@ function drawWaveform(canvas, data) {
 async function startSeparation() {
   if (!selectedFile) return;
 
+  modelRefreshMode = "active";
   setBusy(true);
   if (debugPollingEnabled && pollDebugLine) {
     pollDebugLine.textContent = "任务已创建，准备开始轮询";
@@ -333,15 +433,21 @@ async function startSeparation() {
     const data = await response.json().catch(() => ({}));
 
     if (!response.ok) {
+      if (data.error === "model_not_ready") {
+        throw new Error(formatModelNotReadyMessage(data));
+      }
       throw new Error(data.message || "分轨任务创建失败。");
     }
 
     currentJobId = data.jobId;
     setStatus("处理中", "Processing", "分轨任务已创建，正在等待服务器处理...", 10);
+    scheduleModelRefresh();
     pollJobStatus(data.jobId);
   } catch (error) {
     setStatus("创建任务失败", "Error", error.message, 0, true);
     setBusy(false);
+    modelRefreshMode = "idle";
+    scheduleModelRefresh();
   }
 }
 
@@ -368,8 +474,14 @@ async function pollJobStatus(jobId) {
 
       if (status.status === "error") {
         updateDebugPolling(status, attempts + 1);
-        setStatus("处理失败", "Error", status.error || "分轨处理失败。", 0, true);
+        if (status.errorCode === "model_not_ready") {
+          setStatus("模型未就绪", "Error", formatModelNotReadyMessage(status), 0, true);
+        } else {
+          setStatus("处理失败", "Error", status.error || "分轨处理失败。", 0, true);
+        }
         setBusy(false);
+        modelRefreshMode = "idle";
+        scheduleModelRefresh();
         return;
       }
 
@@ -377,7 +489,23 @@ async function pollJobStatus(jobId) {
         updateDebugPolling(status, attempts + 1);
         setStatus("排队中", "Queued", "当前任务正在排队，稍后会自动开始处理。", 6);
         attempts++;
+        modelRefreshMode = "active";
         setTimeout(poll, 1200);
+        return;
+      }
+
+      if (status.status === "downloading") {
+        updateDebugPolling(status, attempts + 1);
+        const downloadProgress = Number(status.modelDownload?.progress || 0);
+        setStatus(
+          "模型下载中",
+          "Downloading",
+          formatModelDownloadMessage(status),
+          Math.max(5, Math.min(50, Math.round((status.progress || downloadProgress || 5))))
+        );
+        modelRefreshMode = "active";
+        scheduleModelRefresh();
+        setTimeout(poll, 1000);
         return;
       }
 
@@ -385,14 +513,52 @@ async function pollJobStatus(jobId) {
       const progress = Math.min(status.progress || 10, 95);
       setStatus("处理中", "Processing", `正在使用 ${status.model || "spleeter:2stems"} 模型分离音轨...`, progress);
       attempts++;
+      modelRefreshMode = "active";
+      scheduleModelRefresh();
       setTimeout(poll, 1000);
     } catch (e) {
       attempts++;
+      scheduleModelRefresh();
       setTimeout(poll, 2000);
     }
   };
 
   poll();
+}
+
+function formatModelNotReadyMessage(payload) {
+  const downloadError = payload.modelDownload?.error || payload.error;
+  if (downloadError) {
+    return downloadError;
+  }
+
+  const model = payload.effectiveModel || payload.model || "当前模型";
+  const cache = payload.modelCache || payload.cache || {};
+  const directory = cache.directory || payload.modelPath || "未提供目录";
+  const missingFiles = Array.isArray(cache.missingFiles) && cache.missingFiles.length > 0
+    ? cache.missingFiles.join(", ")
+    : "未提供缺失文件列表";
+
+  return `${model} 模型文件未准备完成。目录: ${directory}。缺少文件: ${missingFiles}。`;
+}
+
+function formatModelDownloadMessage(payload) {
+  const model = payload.effectiveModel || payload.model || payload.modelDownload?.model || "当前模型";
+  const status = payload.modelDownload?.status;
+  const progress = Number(payload.modelDownload?.progress || 0);
+  const downloadedBytes = Number(payload.modelDownload?.downloadedBytes || 0);
+  const totalBytes = Number(payload.modelDownload?.totalBytes || 0);
+  const retryText = formatDownloadAttemptSuffix(payload.modelDownload);
+
+  if (status === "extracting") {
+    return `${model} 模型已下载完成，正在解压并校验文件...${retryText ? `（${retryText}）` : ""}`;
+  }
+
+  if (totalBytes > 0) {
+    return `正在下载 ${model} 模型 ${progress}%。已下载 ${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)}。${retryText ? `（${retryText}）` : ""}`;
+  }
+
+  return `正在下载 ${model} 模型 ${progress}%。${retryText ? `（${retryText}）` : ""}`;
 }
 
 function handleCompletion(jobId, status) {
@@ -412,6 +578,8 @@ function handleCompletion(jobId, status) {
   }
 
   setBusy(false);
+  modelRefreshMode = "idle";
+  scheduleModelRefresh();
 }
 
 async function prepareStemsForPlayback(jobId, stems) {
@@ -836,6 +1004,8 @@ function toggleStemPlayback(stemName) {
   }
   if (!stemGains[stemName]) return;
 
+  const shouldStartPlayback = playbackState !== "playing";
+
   if (soloStem === stemName) {
     soloStem = null;
     Object.keys(stemGains).forEach((name) => applyStemGain(name));
@@ -845,6 +1015,11 @@ function toggleStemPlayback(stemName) {
   }
 
   updatePlayButtons();
+
+  // Solo should be audible immediately when user clicks it while idle/paused.
+  if (shouldStartPlayback) {
+    playAllStems();
+  }
 }
 
 function updatePlayButtons() {
@@ -889,6 +1064,7 @@ function resetStemStates() {
   stemWaveformCache = {};
   stemBufferPromiseCache = {};
   availableStemNames = [];
+  modelRefreshMode = "idle";
   transport = {
     isPlaying: false,
     startedAtCtxTime: 0,
@@ -930,7 +1106,11 @@ function resetStemStates() {
   masterProgress.disabled = true;
   setStemLoadStatus("");
 
+  // Keep button label/icon in sync after state reset.
+  updatePlayAllButton();
+
   updateStemVisibility(separationModeSelect.value, []);
+  scheduleModelRefresh();
 }
 
 function updatePlayAllAvailability() {
@@ -1059,10 +1239,25 @@ function seekToProgress() {
 }
 
 function setBusy(isBusy) {
-  separateButton.disabled = isBusy || !selectedFile;
+  separateButton.disabled = isBusy || !selectedFile || !hasSelectableModelForCurrentMode();
   input.disabled = isBusy;
   modelSelect.disabled = isBusy;
   separationModeSelect.disabled = isBusy;
+}
+
+function hasSelectableModelForCurrentMode() {
+  return Array.from(modelSelect.options).some((option) => !option.disabled);
+}
+
+function updateSeparateAvailability() {
+  const hasSelectableModel = hasSelectableModelForCurrentMode();
+  separateButton.disabled = !selectedFile || !hasSelectableModel;
+
+  if (selectedFile && !hasSelectableModel) {
+    const mode = separationModeSelect.value;
+    const modeLabel = mode === "six" ? "5轨" : mode === "vocals" ? "2轨" : "4轨";
+    modelHint.textContent = `${modeLabel}模式当前没有可用模型，请等待下载/修复完成。`;
+  }
 }
 
 function setupDebugPanel() {
@@ -1086,8 +1281,17 @@ function updateDebugPolling(status, attempt) {
   const state = status?.status || "unknown";
   const progress = Number.isFinite(status?.progress) ? Math.max(0, Math.min(100, status.progress)) : 0;
   const message = status?.message || "无";
+  const stemDebug = status?.stemDebug
+    ? Object.entries(status.stemDebug)
+        .map(([stem, meta]) => {
+          const hash = typeof meta.sha256 === "string" ? meta.sha256.slice(0, 8) : "nohash";
+          const size = Number.isFinite(meta.size) ? meta.size : 0;
+          return `${stem}:${meta.parent}/${meta.fileName}/${size}/${hash}`;
+        })
+        .join(", ")
+    : "无";
   const time = new Date().toLocaleTimeString("zh-CN", { hour12: false });
-  pollDebugLine.textContent = `状态=${state} | 进度=${progress}% | 轮询=${attempt} | 时间=${time} | 消息=${message}`;
+  pollDebugLine.textContent = `状态=${state} | 进度=${progress}% | 轮询=${attempt} | 时间=${time} | 消息=${message} | 文件=${stemDebug}`;
 }
 
 function updateStemVisibility(mode, availableStems = []) {

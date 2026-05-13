@@ -1,0 +1,133 @@
+name: Build PrismTrack Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+      - "260504-feat-prismtrack-spleeter-migration"
+    paths:
+      - ".github/workflows/build-windows.yml"
+      - "PrismTrack-Spleeter/**"
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: PrismTrack-Spleeter
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: PrismTrack-Spleeter/package-lock.json
+
+      - name: Prepare Windows runtime baseline
+        run: |
+          $zipUrl = "https://makenweb.com/downloads/SpleeterGUI_2.9.4.0.zip"
+          $zipPath = Join-Path $env:RUNNER_TEMP "SpleeterGUI_2.9.4.0.zip"
+          $extractRoot = Join-Path $env:RUNNER_TEMP "spleetergui-runtime"
+
+          if (-not (Test-Path $zipPath)) {
+            Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath
+          }
+
+          if (Test-Path $extractRoot) {
+            Remove-Item $extractRoot -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $extractRoot | Out-Null
+
+          Expand-Archive -Path $zipPath -DestinationPath $extractRoot -Force
+
+          $pythonExe = Get-ChildItem -Path $extractRoot -Filter "python.exe" -Recurse -File | Select-Object -First 1
+          if (-not $pythonExe) {
+            Write-Error "Cannot locate python.exe inside extracted runtime archive."
+            exit 1
+          }
+          $pythonDir = Split-Path -Parent $pythonExe.FullName
+          $sourceRoot = Split-Path -Parent $pythonDir
+          Write-Host "Detected python dir: $pythonDir"
+          Write-Host "Detected runtime root: $sourceRoot"
+
+          if (Test-Path "python") {
+            Remove-Item "python" -Recurse -Force
+          }
+          Copy-Item (Join-Path $sourceRoot "python") -Destination "python" -Recurse
+          Copy-Item (Join-Path $sourceRoot "ffmpeg.exe") -Destination "ffmpeg.exe" -Force
+          Copy-Item (Join-Path $sourceRoot "ffprobe.exe") -Destination "ffprobe.exe" -Force
+          Copy-Item (Join-Path $sourceRoot "ffplay.exe") -Destination "ffplay.exe" -Force
+
+      - name: Verify required Windows runtime files
+        run: |
+          $required = @(
+            "python/python.exe",
+            "ffmpeg.exe",
+            "ffprobe.exe",
+            "ffplay.exe",
+            "scripts/spleeter_separate.py"
+          )
+
+          $missing = @()
+          foreach ($item in $required) {
+            if (-not (Test-Path $item)) {
+              $missing += $item
+            }
+          }
+
+          if ($missing.Count -gt 0) {
+            Write-Error "Missing required runtime files:`n$($missing -join "`n")"
+            exit 1
+          }
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows installer
+        env:
+          GH_RUN_NUMBER: ${{ github.run_number }}
+          GH_SHORT_SHA: ${{ github.sha }}
+        run: npm run dist:win
+
+      - name: Verify packaged Node dependencies
+        run: |
+          $nodeModules = "dist/win-unpacked/resources/app/node_modules"
+          $required = @(
+            "archiver",
+            "archiver-utils",
+            "zip-stream"
+          )
+
+          $missing = @()
+          foreach ($item in $required) {
+            $path = Join-Path $nodeModules $item
+            if (-not (Test-Path $path)) {
+              $missing += $path
+            }
+          }
+
+          if ($missing.Count -gt 0) {
+            Write-Error "Missing packaged Node dependencies:`n$($missing -join "`n")"
+            exit 1
+          }
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: prismtrack-windows-${{ github.run_number }}
+          path: |
+            PrismTrack-Spleeter/release/**/*.exe
+            PrismTrack-Spleeter/release/**/*.zip
+            PrismTrack-Spleeter/release/**/*.yml
+            PrismTrack-Spleeter/release/**/*.blockmap
+            PrismTrack-Spleeter/dist/**/*.exe
+            PrismTrack-Spleeter/dist/**/*.zip
+            PrismTrack-Spleeter/dist/**/*.yml
+            PrismTrack-Spleeter/dist/**/*.blockmap
+          if-no-files-found: error

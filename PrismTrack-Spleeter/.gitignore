@@ -119,6 +119,8 @@
 *.cache
 **/.cache/
 **/.runtime/
+**/pretrained_models/
+/python/
 **/tmp/
 **/temp/
 
@@ -156,6 +158,10 @@
 **/web/build/
 **/.flutter-plugins
 **/.flutter-plugins-dependencies
+
+!build/
+!build/icons/
+!build/icons/**
 
 # Compressed files
 *.zip

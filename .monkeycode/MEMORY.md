@@ -44,3 +44,151 @@ Agent 在任务执行过程中发现的条目应遵循以下格式：
   - 前端风格与交互功能保持和参考项目一致
   - 后端分离模型从 Demucs 替换为 Spleeter
   - 相关文件夹命名改为 Spleeter 与 PrismTrack 相关，不保留原 Demucs 命名
+
+[为项目增加 Windows 封装工作流]
+- Date: 2026-05-04
+- Context: 用户要求在不改原本 Web 应用代码的前提下，新增 GitHub Windows 应用封装能力
+- Instructions:
+  - 不修改原本 Web 应用业务代码，采用新增封装层的方式实现 Windows 应用
+  - 安装程序需要支持用户选择安装路径
+  - 生成符合标准的应用 ICO 多尺寸图标资源
+  - 程序内超链接需使用 Windows 默认浏览器打开
+
+[记录 Lazy Model Fetch 方案]
+- Date: 2026-05-06
+- Context: 用户要求先记住一个暂不实施的安装包优化方案，便于后续直接引用
+- Instructions:
+  - 方案名使用 Lazy Model Fetch
+  - 该方案指 Windows 安装包不内置 Spleeter 模型权重文件
+  - 用户首次使用某个 Spleeter 模型时再下载对应权重到本地缓存目录
+  - 下载过程需要在现有 Web 状态区显示模型权重下载进度
+  - 该方案后续实施时应尽量不改变原有 Web 项目的页面结构与主要交互
+
+[SpleeterGUI Windows 运行时对照基线]
+- Date: 2026-05-08
+- Context: Agent 在执行 SpleeterGUI Windows 发布包实物分析时发现
+- Category: 环境配置
+- Instructions:
+  - SpleeterGUI 2.9.4 的 Windows 运行时基线为 Python 3.7、Spleeter 2.3.1、TensorFlow 2.5.0
+  - 发布包内置 python 目录与 ffmpeg.exe/ffprobe.exe/ffplay.exe，不依赖系统 PATH 提供这些可执行文件
+  - 发布包预留 pretrained_models 目录但默认不内置模型，首次运行时下载模型到本地缓存
+  - Windows 运行仍依赖系统已安装 VC Runtime，发布包内未发现 vcruntime140.dll 与 msvcp140.dll
+
+[PrismTrack Spleeter 模型缓存目录约定]
+- Date: 2026-05-08
+- Context: Agent 在执行 PrismTrack 后端模型缓存接线时发现
+- Category: 环境配置
+- Instructions:
+  - 后端统一使用环境变量 MODEL_PATH 或 SPLEETER_MODEL_PATH 指向 Spleeter 本地模型缓存根目录
+  - 未显式配置时默认使用 PrismTrack-Spleeter/pretrained_models
+  - 每个模型目录按 2stems、4stems、5stems 分目录存放，并以 checkpoint、model.data-00000-of-00001、model.index、model.meta 作为完整性检查基线
+
+[PrismTrack Windows 桌面封装层约定]
+- Date: 2026-05-08
+- Context: Agent 在恢复最小 Windows Electron 宿主层时发现
+- Category: 代码结构
+- Instructions:
+  - Windows 桌面层应保持最小职责，只负责启动本地 server.js 并在桌面窗口中承载 Web UI
+  - 外部链接统一通过系统默认浏览器打开，不在应用内新开不受控窗口
+  - 应用级运行目录使用 Electron userData，下挂 .runtime 与 pretrained_models，避免写入安装目录
+  - Windows 安装包继续采用 NSIS，并允许用户自定义安装路径
+
+[PrismTrack Windows 桌面启动前校验约定]
+- Date: 2026-05-08
+- Context: Agent 在补充 Electron 主进程错误提示时发现
+- Category: 代码模式
+- Instructions:
+  - Windows 桌面主进程在启动本地 server.js 前，应先校验 python/python.exe、ffmpeg.exe、ffprobe.exe 与 scripts/spleeter_separate.py 是否存在
+  - 若关键运行时文件缺失，应直接弹出包含缺失文件清单和检测目录的中文错误提示，而不是仅等待服务启动超时报错
+
+[PrismTrack Windows CI 打包约定]
+- Date: 2026-05-08
+- Context: Agent 在修正 GitHub Actions Windows 打包流程时发现
+- Category: 构建方法
+- Instructions:
+  - Windows 打包 workflow 位于仓库根目录 .github/workflows/build-windows.yml，工作目录固定为 PrismTrack-Spleeter
+  - CI 在执行 npm run dist:win 前需校验 python/python.exe、ffmpeg.exe、ffprobe.exe、ffplay.exe、scripts/spleeter_separate.py 是否存在
+  - CI 打包产物统一从 PrismTrack-Spleeter/dist 上传，至少包含 .exe 安装包
+
+[PrismTrack Windows 桌面启动日志约定]
+- Date: 2026-05-13
+- Context: Agent 在处理 Windows 安装包启动超时时发现
+- Category: 代码模式
+- Instructions:
+  - Windows 桌面主进程启动日志写入 Electron userData 下的 logs/desktop.log
+  - Windows 预期日志路径为 %APPDATA%/prismtrack-spleeter/logs/desktop.log，启动失败弹窗应提示该路径
+  - packaged Electron 使用 process.execPath 启动 server.js 时需要设置 ELECTRON_RUN_AS_NODE=1
+  - 每次修改桌面启动链路时应更新 DESKTOP_RUNTIME_CHECK_REV，便于区分用户运行的安装包版本
+
+[PrismTrack Windows packaged Node 依赖校验约定]
+- Date: 2026-05-09
+- Context: Agent 在处理安装包内缺失 archiver-utils 导致本地服务崩溃时发现
+- Category: 构建方法
+- Instructions:
+  - server.js 运行所需的关键 Node 运行时依赖应作为 package.json dependencies 显式声明，不能只依赖间接传递依赖被 electron-builder 自动收集
+  - Windows 打包 workflow 在 npm run dist:win 后应校验 dist/win-unpacked/resources/app/node_modules 中包含 archiver、archiver-utils、zip-stream
+  - package-lock.json 与 package.json 保持一致后，Windows CI 应优先使用 npm ci
+
+[PrismTrack 桌面启动 ready 协议]
+- Date: 2026-05-09
+- Context: Agent 在处理 Windows 桌面服务已监听但 /api/health 深度检查超时时发现
+- Category: 代码模式
+- Instructions:
+  - 桌面壳判断本地 Web 服务是否可打开时，应请求轻量 /api/ready，而不是会触发 Python/Spleeter/ffmpeg 探测的 /api/health
+  - /api/health 保留为深度运行时诊断接口，可在开窗后后台记录或由前端状态区使用，但不应阻塞桌面窗口创建
+  - 每次修改桌面启动等待协议时应更新 DESKTOP_RUNTIME_CHECK_REV，便于区分用户安装包版本
+
+[PrismTrack 桌面启动首页回退探测]
+- Date: 2026-05-10
+- Context: Agent 在处理 runtime-check-r6 安装包 /api/ready 返回 404 但服务已监听时发现
+- Category: 代码模式
+- Instructions:
+  - 桌面壳等待本地服务时应优先探测 /api/ready，若该接口返回 404 或不可用，应回退探测首页 / 是否返回 200
+  - 首页 / 返回 200 表示 Web UI 已可加载，应允许创建窗口，避免因 ready 路由版本差异阻塞桌面启动
+  - 启动日志应记录实际命中的 readiness strategy，便于区分 ready 命中和 index fallback
+
+[PrismTrack 桌面运行时路径传递约定]
+- Date: 2026-05-10
+- Context: Agent 在处理桌面首页初始 health 报 Python 运行时不可用时发现
+- Category: 代码模式
+- Instructions:
+  - 桌面主进程启动 server.js 时必须显式传入 SPLEETER_PYTHON、FFMPEG、FFPROBE、SPLEETER_WRAPPER，路径来源为 resolveRuntimeFile/resolveAppFile
+  - Windows packaged 布局下 Python 和 ffmpeg 位于安装根或 resources 运行时目录，而 server.js 的 __dirname 是 resources/app，不能依赖后端默认本地路径自动命中
+  - 前端初始 /api/health 深度运行时检查失败不应直接显示服务不可用，应保留为运行时待验证状态，真实失败由首次任务或后台诊断暴露
+
+[PrismTrack 模型下载与分离超时约定]
+- Date: 2026-05-11
+- Context: Agent 在处理模型下载耗时导致前端误报分离超时时发现
+- Category: 代码模式
+- Instructions:
+  - 前端轮询任务状态时，downloading 状态不计入分离处理超时尝试次数；只有 queued/processing/error 等非下载阶段参与处理超时判断
+  - 模型下载使用 APP_RUNTIME_DIR/model-downloads 下稳定命名的 .tar.gz.part 临时文件，完成后重命名为 .tar.gz，以支持中断后续传
+  - 模型下载续传应使用 HTTP Range 请求，服务端返回 206 时追加写入，返回 200 时重下，返回 416 且本地 part 存在时按已完成文件进入校验流程
+
+[PrismTrack 模型下载错误展示约定]
+- Date: 2026-05-11
+- Context: Agent 在处理模型下载失败后前端只显示模型缺文件时发现
+- Category: 代码模式
+- Instructions:
+  - fetchModelChecksum 失败不应阻断模型下载，应记录 warning 并在无 checksum 时继续下载与解压
+  - 模型下载失败时应把 modelDownload.error 传给前端优先展示，避免用通用缺文件文案掩盖真实网络、校验或解压错误
+  - 后端模型下载流程应记录下载 URL、续传 byte、解压目标与失败堆栈，便于通过桌面日志定位问题
+
+[PrismTrack Windows 模型下载 TLS 兜底]
+- Date: 2026-05-11
+- Context: Agent 在处理 Windows 桌面模型下载 fetch 报 UNABLE_TO_VERIFY_LEAF_SIGNATURE 时发现
+- Category: 代码模式
+- Instructions:
+  - Node fetch 下载 GitHub 模型若因证书链问题失败，应回退到系统 curl.exe 下载，以使用 Windows 系统证书链
+  - curl 兜底下载同样写入 model-downloads 下的 .tar.gz.part，并使用 --continue-at - 保留断点续传能力
+  - runCommand 需要支持 timeoutMs=0 表示不设置命令超时，避免大模型下载被子进程超时杀死
+  - Windows curl Schannel 若报 CRYPT_E_NO_REVOCATION_CHECK，应使用 --ssl-no-revoke 跳过吊销检查，同时保留常规证书校验
+  - curl 下载应使用 --silent --show-error，避免进度条污染桌面日志
+
+[PrismTrack Windows 打包触发约定]
+- Date: 2026-05-11
+- Context: Agent 在处理 pull_request 事件重复 Windows 打包且 PR run npm ci 失败时发现
+- Category: 构建方法
+- Instructions:
+  - Build PrismTrack Windows workflow 仅通过 push 和 workflow_dispatch 触发，不使用 pull_request 触发
+  - Windows 安装包产物以 push run 为准，避免同一提交在 PR 事件重复打包并产生重复 artifacts 或偶发依赖安装失败

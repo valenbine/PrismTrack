@@ -2,12 +2,78 @@
   "name": "prismtrack-spleeter",
   "version": "1.0.0",
   "private": true,
+  "description": "PrismTrack web app powered by Spleeter.",
+  "author": "valenbine",
+  "main": "desktop/main.cjs",
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "desktop": "electron .",
+    "dist:win": "electron-builder --win nsis"
   },
   "dependencies": {
-    "archiver": "^7.0.1"
+    "archiver": "^7.0.1",
+    "archiver-utils": "^5.0.2"
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.valenbine.prismtrack",
+    "productName": "PrismTrack",
+    "asar": false,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "desktop/**/*",
+      "server.js",
+      "package.json",
+      "package-lock.json",
+      "index.html",
+      "styles.css",
+      "src/**/*",
+      "scripts/**/*",
+      "pretrained_models/**/*",
+      "favicon.svg"
+    ],
+    "extraFiles": [
+      {
+        "from": "python",
+        "to": "python",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "ffmpeg.exe",
+        "to": "ffmpeg.exe"
+      },
+      {
+        "from": "ffprobe.exe",
+        "to": "ffprobe.exe"
+      },
+      {
+        "from": "ffplay.exe",
+        "to": "ffplay.exe"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "PrismTrack-Setup-${version}-${env.GH_RUN_NUMBER}-${env.GH_SHORT_SHA}.${ext}"
+    }
   }
 }
